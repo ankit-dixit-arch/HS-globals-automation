@@ -5,7 +5,7 @@ import {
 } from "./constants.js";
 import { matchCountry, matchMedicine, phoneRequirementMatches } from "./filters.js";
 import { logEvent } from "./logger.js";
-import { getCardFingerprint, getProductTitle } from "./parser.js";
+import { getProductTitle } from "./parser.js";
 import {
   CONTACT_BUTTON_SELECTOR,
   LEAD_CARD_ID_SELECTOR,
@@ -46,8 +46,6 @@ export async function scanAndClick(reason = "interval") {
     const buttons = findContactButtons();
     await logEvent("Scanned page [" + reason + "]: found " + buttons.length + " lead card(s).");
 
-    // const clickedSet = new Set(settings.clickedFingerprints);
-     const clickedSet = new Set();
     for (const button of buttons) {
       const currentClicks = await getClicksToday();
       if (currentClicks >= settings.maxClicksPerDay) {
@@ -59,9 +57,6 @@ export async function scanAndClick(reason = "interval") {
       const titleText = getProductTitle(card).toLowerCase();
       const fullText = (card.textContent || "").toLowerCase();
       const snippet = (card.textContent || "").trim().slice(0, 150);
-      const fingerprint = getCardFingerprint(card);
-
-      if (clickedSet.has(fingerprint)) continue;
 
       const { matchedKeyword, medicineMatch } = matchMedicine(settings, titleText);
       const { matchedCountry, countryMatch } = matchCountry(settings, fullText);
@@ -102,8 +97,6 @@ export async function scanAndClick(reason = "interval") {
         try {
           button.click();
           await incrementClicksToday();
-          clickedSet.add(fingerprint);
-          await chrome.storage.local.set({ clickedFingerprints: Array.from(clickedSet) });
           await logEvent("CLICKED matching lead " + why + ": \"" + snippet + "\"");
         } catch (e) {
           await logEvent("ERROR clicking lead: " + e.message);
