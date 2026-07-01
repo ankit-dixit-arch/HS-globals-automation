@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  body {
+    font-family: -apple-system, Segoe UI, Arial, sans-serif;
+    width: 340px;
+    padding: 14px;
+    color: #1a1a1a;
+  }
+  h1 {
+    font-size: 15px;
+    margin: 0 0 10px 0;
+  }
+  label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 10px;
+    margin-bottom: 3px;
+  }
+  textarea, input, select {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 13px;
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+  }
+  textarea {
+    height: 50px;
+    resize: vertical;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .live-status {
+    margin: 0 0 10px 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .live-status .badge {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .live-status.active {
+    background: #dcfce7;
+    color: #166534;
+  }
+  .live-status.active .badge {
+    color: #15803d;
+  }
+  .live-status.inactive {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+  .live-status.inactive .badge {
+    color: #b91c1c;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .live-status.active .dot {
+    background: #16a34a;
+  }
+  .live-status.inactive .dot {
+    background: #dc2626;
+  }
+  .status {
+    margin-top: 12px;
+    padding: 8px;
+    background: #f3f4f6;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  button {
+    margin-top: 12px;
+    width: 100%;
+    padding: 8px;
+    background: #1a8a5a;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: #6b7280;
+  }
+  .toggle-btn {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+  .toggle-btn.on {
+    background: #1a8a5a;
+  }
+  .toggle-btn.off {
+    background: #dc2626;
+  }
+  #log {
+    margin-top: 6px;
+    max-height: 170px;
+    overflow-y: auto;
+    background: #0b0f0d;
+    border-radius: 6px;
+    padding: 5px;
+  }
+  .log-empty {
+    color: #6b7280;
+    font-size: 11px;
+    padding: 14px 6px;
+    text-align: center;
+  }
+  .log-entry {
+    display: flex;
+    gap: 7px;
+    padding: 4px 6px;
+    border-left: 3px solid #4b5563;
+    margin-bottom: 2px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.03);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10.5px;
+    line-height: 1.45;
+  }
+  .log-entry .log-time {
+    color: #9ca3af;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .log-entry .log-msg {
+    color: #e5e7eb;
+    word-break: break-word;
+  }
+  .log-entry.clicked { border-left-color: #22c55e; }
+  .log-entry.clicked .log-msg { color: #86efac; }
+  .log-entry.test { border-left-color: #f59e0b; }
+  .log-entry.test .log-msg { color: #fcd34d; }
+  .log-entry.error { border-left-color: #ef4444; }
+  .log-entry.error .log-msg { color: #fca5a5; }
+  .log-entry.cap { border-left-color: #eab308; }
+  .log-entry.cap .log-msg { color: #fde68a; }
+  .log-entry.paused { border-left-color: #6b7280; opacity: 0.7; font-style: italic; }
+  .log-entry.scan { border-left-color: #3b82f6; }
+  .log-actions {
+    display: flex;
+    gap: 6px;
+  }
+  .log-actions button {
+    margin: 0;
+    width: auto;
+    padding: 4px 9px;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+  <h1>IndiaMART Auto-Click Settings</h1>
+
+  <button id="masterToggle" class="toggle-btn">Loading...</button>
+
+  <div id="liveStatus" class="live-status">Checking...</div>
+  <div id="lastScan" class="status" style="margin-top:-6px; margin-bottom:10px;">Last scan: --</div>
+
+  <label>Saved Filter Profiles</label>
+  <select id="profileSelect"></select>
+  <div class="row" style="margin-top:6px;">
+    <input type="text" id="profileName" placeholder="Profile name (e.g. Mounjaro - Germany)" style="flex:1;" />
+  </div>
+  <div class="row">
+    <button id="saveAsProfile" style="margin-top:6px;">Save as New Profile</button>
+    <button id="updateProfile" class="secondary" style="margin-top:6px;">Update Selected</button>
+  </div>
+  <button id="deleteProfile" class="secondary">Delete Selected Profile</button>
+
+  <hr style="margin:14px 0; border:none; border-top:1px solid #e5e7eb;" />
+
+  <label>Medicine keywords (one per line, any synonym/brand name)</label>
+  <textarea id="keywords" placeholder="Mounjaro&#10;Tirzepatide"></textarea>
+
+  <label>Target countries (one per line)</label>
+  <textarea id="countries" placeholder="Germany&#10;Austria"></textarea>
+
+  <div class="row">
+    <input type="checkbox" id="requirePhone" />
+    <label style="margin:0;">Only click if phone number is available</label>
+  </div>
+
+  <div class="row" style="background:#fff7ed; padding:6px; border-radius:5px; border:1px solid #fed7aa;">
+    <input type="checkbox" id="testMode" />
+    <label style="margin:0;">Test Mode (log matches, don't actually click)</label>
+  </div>
+
+  <label>Max clicks per day</label>
+  <input type="number" id="maxClicks" min="1" value="7" />
+
+  <button id="save">Apply These Settings Now</button>
+
+  <div class="status" id="status">Loading status...</div>
+
+  <button id="resetToday" class="secondary">Reset Today's Click Count</button>
+
+  <div class="row" style="margin-top:16px; margin-bottom:2px; justify-content:space-between;">
+    <label style="margin:0;">Activity Log</label>
+    <div class="log-actions">
+      <button id="downloadLog" class="secondary">Download</button>
+      <button id="clearLog" class="secondary">Clear</button>
+    </div>
+  </div>
+  <div id="log"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
