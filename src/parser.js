@@ -1,5 +1,4 @@
 import { PRODUCT_TITLE_SELECTOR } from "./selectors.js";
-import { simpleHash } from "./utils.js";
 
 export function getProductTitle(cardEl) {
   // The product/medicine name lives in its own span, confirmed from real
@@ -16,19 +15,6 @@ export function getProductTitle(cardEl) {
   // fall back to whole-card text (old behavior) than to silently match
   // nothing.
   return cardEl.textContent || "";
-}
-
-export function getCardFingerprint(cardEl) {
-  // Prefer IndiaMART's own card id (e.g. id="BLCard13") -- confirmed via
-  // real markup inspection. This is exact and stable, unlike a text hash
-  // which could theoretically collide between two different leads with
-  // very similar opening text.
-  if (cardEl.id && cardEl.id.startsWith("BLCard")) {
-    return cardEl.id;
-  }
-  // Fallback: hash of the card's text if no id is found (e.g. markup changes)
-  const snippet = (cardEl.textContent || "").trim().slice(0, 150);
-  return simpleHash(snippet);
 }
 
 export function cardHasPhoneIcon(cardEl) {

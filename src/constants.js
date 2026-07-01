@@ -11,7 +11,6 @@ export const DEFAULT_SETTINGS = {
   targetCountries: [],
   requirePhone: true,
   maxClicksPerDay: 7,
-  clickedFingerprints: [],
   testMode: false,
   botEnabled: true,
 };
