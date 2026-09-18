@@ -1,0 +1,1 @@
+# HS-globals-automation
