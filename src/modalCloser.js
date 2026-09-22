@@ -16,9 +16,20 @@ function findModalButton(modalEl) {
   return null;
 }
 
+// Cached so closing a popup never waits on a chrome.storage round trip.
+let botEnabledCache = null;
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.botEnabled) {
+    botEnabledCache = changes.botEnabled.newValue !== false;
+  }
+});
+
 async function botIsEnabled() {
+  if (botEnabledCache !== null) return botEnabledCache;
   const { botEnabled } = await chrome.storage.local.get({ botEnabled: true });
-  return botEnabled !== false;
+  if (botEnabledCache === null) botEnabledCache = botEnabled !== false;
+  return botEnabledCache;
 }
 
 async function closeModal(modalEl, logEvent) {
@@ -111,8 +122,12 @@ function closeAllOpenPanels(logEvent) {
 export function setupPopupAutoDismiss(logEvent) {
   closeAllOpenPanels(logEvent);
 
-  const observer = new MutationObserver(() => {
-    closeAllOpenPanels(logEvent);
+  const observer = new MutationObserver((mutations) => {
+    // Only nodes being ADDED can be a new popup; removals and other churn
+    // used to trigger two full-document queries each time.
+    if (mutations.some((m) => m.addedNodes.length > 0)) {
+      closeAllOpenPanels(logEvent);
+    }
   });
 
   observer.observe(document.body, {

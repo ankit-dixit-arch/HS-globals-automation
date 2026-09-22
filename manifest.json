@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "IndiaMART Auto-Click email added version",
-  "version": "1.3",
+  "version": "1.4.1",
   "description": "Auto-clicks 'Contact Buyer Now' on IndiaMART leads matching your medicine name, country, and phone-availability filters, with a daily click cap. Queues burst lead detections so none are lost while another scan is running.",
   "permissions": [
     "storage",

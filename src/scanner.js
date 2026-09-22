@@ -1,6 +1,5 @@
 import {
-  MAX_CLICK_DELAY_MS,
-  MIN_CLICK_DELAY_MS,
+  MAX_CLICKS_PER_SCAN,
   MUTATION_DEBOUNCE_MS,
 } from "./constants.js";
 import { matchCountry, matchMedicine } from "./filters.js";
@@ -9,7 +8,6 @@ import { setupPopupAutoDismiss } from "./modalCloser.js";
 import {
   cardHasEmailIcon,
   cardHasPhoneIcon,
-  getCardFingerprint,
   getProductTitle,
 } from "./parser.js";
 import {
@@ -19,7 +17,10 @@ import {
   getCardForButton,
 } from "./selectors.js";
 import { getSettings } from "./storage.js";
-import { sleep } from "./utils.js";
+
+// Per-card console output is useful when debugging filters but costs time on
+// every scan (5s timer + every mutation). Flip to true only while debugging.
+const DEBUG_CONSOLE = false;
 
 // A scan can take long enough for IndiaMART to insert more cards while it is
 // running.  Never discard those triggers: keep one coalesced follow-up pass
@@ -27,7 +28,6 @@ import { sleep } from "./utils.js";
 let scanLoopPromise = null;
 const pendingScanReasons = new Set();
 let mutationSettleTimer = null;
-const clickedFingerprintsThisPage = new Set();
 
 if (!window.__indiaMartModalCloserStarted) {
   window.__indiaMartModalCloserStarted = true;
@@ -106,67 +106,52 @@ async function drainPendingScans() {
 }
 
 async function scanPageAndClick(reason) {
-  const settings = await getSettings();
+  const settings = await getSettings(); // in-memory after the first call
 
-    if (settings.botEnabled === false) {
-      await chrome.storage.local.set({ lastScanAt: Date.now(), lastScanReason: "paused" });
-      return;
+  // Status bookkeeping for the popup. Fire-and-forget: nothing here may
+  // delay the click.
+  const status = { lastScanAt: Date.now(), lastScanReason: settings.botEnabled === false ? "paused" : reason };
+  chrome.storage.local.set(status).catch(() => {});
+
+  if (settings.botEnabled === false) return;
+
+  const buttons = findContactButtons();
+  logEvent("Scanned page [" + reason + "]: found " + buttons.length + " lead card(s).");
+
+  // Phase 1 collects matches; phase 2 fires them all together.
+  const queue = [];
+
+  for (const button of buttons) {
+    const card = getCardForButton(button);
+    if (!card) {
+      logEvent("Skipped a Contact Buyer button outside a recognized lead card.");
+      continue;
     }
 
-    // const clicksToday = await getClicksToday();
+    const titleText = getProductTitle(card).toLowerCase();
+    const countryText = getLeadCountryText(card);
 
-    await chrome.storage.local.set({ lastScanAt: Date.now(), lastScanReason: reason });
+    // Cheapest checks first; skip the rest for cards that can't match.
+    const { matchedKeyword, medicineMatch } = matchMedicine(settings, titleText);
+    const { matchedCountry, countryMatch } = matchCountry(settings, countryText);
+    if (!DEBUG_CONSOLE && !(medicineMatch && countryMatch)) continue;
 
-    // if (clicksToday >= settings.maxClicksPerDay) {
-    //   await logEvent("Daily cap reached (" + clicksToday + "/" + settings.maxClicksPerDay + "). Skipping scan. [" + reason + "]");
-    //   return;
-    // }
+    const hasPhone = cardHasPhoneIcon(card);
+    const hasEmail = cardHasEmailIcon(card);
 
-    const buttons = findContactButtons();
-    await logEvent("Scanned page [" + reason + "]: found " + buttons.length + " lead card(s).");
+    let contactOk = true;
+    if (settings.requirePhone && settings.requireEmail) {
+      contactOk = hasPhone || hasEmail;
+    } else if (settings.requirePhone) {
+      contactOk = hasPhone;
+    } else if (settings.requireEmail) {
+      contactOk = hasEmail;
+    }
 
-    // Keep this page-session set across queued passes so a card that remains
-    // visible while IndiaMART processes the click is never clicked twice.
-    // Do not seed it from storage: BLCard ids are reused after page reloads.
-    const clickedSet = clickedFingerprintsThisPage;
+    const wouldClick = medicineMatch && countryMatch && contactOk;
 
-    for (const button of buttons) {
-      // const currentClicks = await getClicksToday();
-      // if (currentClicks >= settings.maxClicksPerDay) {
-      //   await logEvent("Reached daily cap mid-scan. Stopping.");
-      //   break;
-      // }
-
-      const card = getCardForButton(button);
-      if (!card) {
-        await logEvent("Skipped a Contact Buyer button outside a recognized lead card.");
-        continue;
-      }
-      const titleText = getProductTitle(card).toLowerCase();
-      const countryText = getLeadCountryText(card);
-      const snippet = (card.textContent || "").trim().slice(0, 150);
-      const fingerprint = getCardFingerprint(card);
-
-      if (clickedSet.has(fingerprint)) continue;
-
-      const { matchedKeyword, medicineMatch } = matchMedicine(settings, titleText);
-      const { matchedCountry, countryMatch } = matchCountry(settings, countryText);
-
-      const hasPhone = cardHasPhoneIcon(card);
-      const hasEmail = cardHasEmailIcon(card);
-
-      let contactOk = true;
-      if (settings.requirePhone && settings.requireEmail) {
-        contactOk = hasPhone || hasEmail;
-      } else if (settings.requirePhone) {
-        contactOk = hasPhone;
-      } else if (settings.requireEmail) {
-        contactOk = hasEmail;
-      }
-
-      const wouldClick = medicineMatch && countryMatch && contactOk;
+    if (DEBUG_CONSOLE) {
       const willClick = wouldClick && !settings.testMode;
-
       const reasons = [];
       if (!medicineMatch) {
         reasons.push(
@@ -176,17 +161,11 @@ async function scanPageAndClick(reason) {
         );
       }
       if (!countryMatch) reasons.push("No country matched");
-
       if (!contactOk) {
-        if (settings.requirePhone && settings.requireEmail) {
-          reasons.push("No phone or email available");
-        } else if (settings.requirePhone) {
-          reasons.push("Phone number unavailable");
-        } else if (settings.requireEmail) {
-          reasons.push("Email ID unavailable");
-        }
+        if (settings.requirePhone && settings.requireEmail) reasons.push("No phone or email available");
+        else if (settings.requirePhone) reasons.push("Phone number unavailable");
+        else if (settings.requireEmail) reasons.push("Email ID unavailable");
       }
-
       console.log("==================================");
       console.log("TITLE:", titleText);
       console.log("KEYWORDS:", settings.medicineKeywords);
@@ -194,50 +173,65 @@ async function scanPageAndClick(reason) {
       console.log("COUNTRY TEXT:", countryText);
       console.log("Keyword:", medicineMatch ? "✅" : "❌");
       console.log("Country:", countryMatch ? "✅" : "❌");
-      console.log(
-        "Phone:",
-        settings.requirePhone ? "toggle ON" : "toggle OFF",
-        "| Card has phone:",
-        hasPhone ? "✅" : "❌"
-      );
-      console.log(
-        "Email:",
-        settings.requireEmail ? "toggle ON" : "toggle OFF",
-        "| Card has email:",
-        hasEmail ? "✅" : "❌"
-      );
+      console.log("Phone:", settings.requirePhone ? "toggle ON" : "toggle OFF", "| Card has phone:", hasPhone ? "✅" : "❌");
+      console.log("Email:", settings.requireEmail ? "toggle ON" : "toggle OFF", "| Card has email:", hasEmail ? "✅" : "❌");
       console.log("Contact requirement:", contactOk ? "✅" : "❌");
-
-      console.log(
-        "Will click:",
-        willClick ? "✅ YES" : wouldClick && settings.testMode ? "TEST MODE - would click" : "❌ NO"
-      );
-
+      console.log("Will click:", willClick ? "✅ YES" : wouldClick && settings.testMode ? "TEST MODE - would click" : "❌ NO");
       console.log("Reason:", reasons.length === 0 ? "All filters matched" : reasons.join("; "));
       console.log("==================================");
-
-      if (medicineMatch && countryMatch && contactOk) {
-        const why = "(matched keyword: \"" + (matchedKeyword || "any") + "\", country: \"" + (matchedCountry || "any") + "\")";
-
-        if (settings.testMode) {
-          await logEvent("[TEST MODE] Would have clicked " + why + ": \"" + snippet + "\"");
-          continue;
-        }
-
-        try {
-          button.click();
-          // await incrementClicksToday();
-           clickedSet.add(fingerprint);
-          // await chrome.storage.local.set({ clickedFingerprints: Array.from(clickedSet) });
-          await logEvent("CLICKED matching lead " + why + ": \"" + snippet + "\"");
-        } catch (e) {
-          await logEvent("ERROR clicking lead: " + e.message);
-        }
-
-        const delay = MIN_CLICK_DELAY_MS + Math.random() * (MAX_CLICK_DELAY_MS - MIN_CLICK_DELAY_MS);
-        await sleep(delay);
-      }
     }
+
+    if (!wouldClick) continue;
+
+    const why = "(matched keyword: \"" + (matchedKeyword || "any") + "\", country: \"" + (matchedCountry || "any") + "\")";
+    const snippet = (card.textContent || "").trim().slice(0, 150);
+
+    if (settings.testMode) {
+      logEvent("[TEST MODE] Would have clicked " + why + ": \"" + snippet + "\"");
+      continue;
+    }
+
+    queue.push({ button, why, snippet, title: titleText, country: countryText });
+
+    // Cap per scan. Matches beyond the cap are NOT marked as clicked, so the
+    // next scan (settle pass or 5s timer) picks them up.
+    if (queue.length >= MAX_CLICKS_PER_SCAN) break;
+  }
+
+  if (queue.length === 0) return;
+
+  // Phase 2: fire every queued click back to back in one tight loop. Nothing
+  // else runs between them -- no filtering, no bookkeeping, no logging, no
+  // awaits -- so all clicks land in the same JS task, before the browser can
+  // render or run any other work. (A page's JS is single-threaded, so this is
+  // as simultaneous as a click can get; IndiaMART's own handlers then run
+  // and their network requests overlap.)
+  for (const item of queue) {
+    try {
+      item.button.click();
+      item.ok = true;
+    } catch (e) {
+      item.error = e;
+    }
+  }
+
+  // Logging only after every click has been sent. No click history is kept:
+  // a clicked card leaves the page, so the next scan simply won't see it.
+  for (const item of queue) {
+    if (item.ok) {
+      console.log("[IndiaMART Auto-Click] CLICKED matching lead:", {
+        product: item.title,
+        country: item.country,
+        match: item.why,
+      });
+      logEvent("CLICKED matching lead " + item.why + ": \"" + item.snippet + "\"");
+    } else {
+      logEvent("ERROR clicking lead: " + item.error.message);
+    }
+  }
+  if (queue.length >= MAX_CLICKS_PER_SCAN) {
+    logEvent("Per-scan click limit (" + MAX_CLICKS_PER_SCAN + ") reached [" + reason + "]; further matches wait for the next scan.");
+  }
 }
 
 export function mutationLooksRelevant(mutations) {
